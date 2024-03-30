@@ -1,0 +1,12 @@
+.vscode/
+
+# build dir
+build/
+
+# core
+vgcore*
+
+# executables
+*.out
+*.exe
+automatic_pump
