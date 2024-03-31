@@ -1,3 +1,4 @@
+#include "logger.h"
 #include "fake_sensors.h"
 
 #include <stdio.h>
@@ -56,11 +57,11 @@ void *handle_sensors(void *args)
         update_sensors_from_file();
         if ((!sensors[R_BOTTOM] || (sensors[T_TOP] && sensors[T_BOTTOM])) && sensors[RELAY]) {
             sensors[RELAY] = 0;
-            printf("[INFO]    Pump turned OFF.\n");
+            write_log(INFO, "Pump turned OFF.");
         }
         else if ((sensors[R_BOTTOM] && !(sensors[T_TOP] || sensors[T_BOTTOM])) && !sensors[RELAY]) {
             sensors[RELAY] = 1;
-            printf("[INFO]    Pump turned ON.\n");
+            write_log(INFO, "Pump turned ON.");
         }
         update_file_from_sensors();
         sleep(1);

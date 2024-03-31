@@ -2,7 +2,7 @@ CC		= gcc
 ARGS	= -Wall -g
 BUILD	= build
 BINARY	= automatic_pump
-OBJECTS = $(BUILD)/request_handler.o $(BUILD)/fake_sensors.o $(BUILD)/server.o $(BUILD)/main.o
+OBJECTS = $(BUILD)/request_handler.o $(BUILD)/fake_sensors.o $(BUILD)/server.o $(BUILD)/logger.o $(BUILD)/main.o
 
 
 all: $(BINARY)

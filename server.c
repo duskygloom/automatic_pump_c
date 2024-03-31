@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#include "logger.h"
 #include "fake_sensors.h"
 #include "request_handler.h"
 
@@ -24,7 +25,7 @@ int create_server_socket(int port)
 	addr.sin_port = htons(port);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	assert(bind(sock, (struct sockaddr *)&addr, sizeof(addr)) != -1);
-	printf("[INFO]    Server socket bound with port %d.\n", port);
+	write_log(INFO, "Server socket bound with port %d.", port);
 	// listen to incoming requests
 	assert(listen(sock, BACKLOG) != -1);
 	return sock;
@@ -40,28 +41,20 @@ void *handle_clients(void *args)
 	char response_buffer[BUFFER_LENGTH];
 	// handle clients forever and ever
 	while (1) {
-#ifdef DEBUG_MODE
-		printf("\n[INFO]    New session.\n");
-#endif
+		write_log(DEBUG, "New session.");
 		struct sockaddr_in client_sockaddr;
 		socklen_t client_sockaddr_len = sizeof(client_sockaddr);
 		// accept request
 		int client_sock = accept(server_sock, (struct sockaddr *)&client_sockaddr, &client_sockaddr_len);
 		assert(client_sock != -1);
-#ifdef DEBUG_MODE
-		printf("[DEBUG]    Connected to a client.\n");
-#endif
+		write_log(DEBUG, "Connected to a client.");
 		// read request
 		assert(read(client_sock, request_buffer, BUFFER_LENGTH) != -1);
-#ifdef DEBUG_MODE
-		printf("[DEBUG]   Received request: %s\n", request_buffer);
-#endif
+		write_log(DEBUG, "Received request: %s", request_buffer);
 		// send response
 		handle_request(request_buffer, response_buffer, start);
 		write(client_sock, response_buffer, strlen(response_buffer));
-#ifdef DEBUG_MODE
-		printf("[DEBUG]   Sent response: %s\n", response_buffer);
-#endif
+		write_log(DEBUG, "Sent response: %s", response_buffer);
 		// close connection
 		close(client_sock);
 	}

@@ -1,3 +1,4 @@
+#include "logger.h"
 #include "fake_sensors.h"
 #include "request_handler.h"
 
@@ -51,19 +52,17 @@ void handle_request(const char *request_buffer, char *response_buffer, time_t st
 	switch (request_type) {
 		case DEV_STATUS:
 		case PUMP_STATUS:
-#ifdef DEBUG_MODE
-			printf("[DEBUG]    Sent JSON status.\n");
-#endif
+			write_log(DEBUG, "Sent JSON response.");
 			break;
 		case DEV_HOME:
 		case PUMP_HOME:
-			printf("[INFO]    Sent HTML page.\n");
+			write_log(INFO, "Sent HTML page.");
 			break;
 		case PUMP_ON:
-			printf("[INFO]    Turned pump ON from website.\n");
+			write_log(INFO, "Turned pump ON from website.");
 			break;
 		case PUMP_OFF:
-			printf("[INFO]    Turned pump OFF from website.\n");
+			write_log(INFO, "Turned pump OFF from website.");
 			break;
 		default:
 			break;
