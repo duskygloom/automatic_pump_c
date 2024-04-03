@@ -8,11 +8,17 @@
 
 #define UPTIME(start) time(0) - start
 
+#define PASSWORD			"12345678"
 #define FAKE_SENSORS_FILE	"fake_sensors.txt"
+#define AUTH_SUCCESS_COOKIE	"Authorized"
+#define AUTH_FAILURE_COOKIE	"Unauthorized"
+#define COOKIE_MAX_AGE		"300"
 
 
 typedef enum request_t {
 	NONE,
+	AUTH_POST,
+	AUTH_HOME,
 	DEV_STATUS,
 	DEV_HOME,
 	PUMP_STATUS,
@@ -24,6 +30,7 @@ typedef enum request_t {
 request_t get_request_type(const char *request_buffer);
 
 void set_header(char *response_buffer, request_t request_type);
+void set_authorization(char *response_buffer, const char *request_buffer, request_t request_type);
 void set_status_json(char *response_buffer, request_t request_type, time_t start);
 void set_precontent(char *response_buffer, request_t request_type);
 void set_content(char *response_buffer, request_t request_type, time_t start);
@@ -38,6 +45,7 @@ void handle_request(const char *request_buffer, char *response_buffer, time_t st
 	// response header
 	strcpy(response_buffer, "");
 	set_header(response_buffer, request_type);
+	set_authorization(response_buffer, request_buffer, request_type);
 	// json status
 	set_status_json(response_buffer, request_type, start);
 	// precontent
@@ -50,11 +58,15 @@ void handle_request(const char *request_buffer, char *response_buffer, time_t st
 	set_scripts(response_buffer, request_type);
 	// logging
 	switch (request_type) {
+		case AUTH_POST:
+			write_log(DEBUG, "Sent authorization cookie.");
+			break;
 		case DEV_STATUS:
 		case PUMP_STATUS:
 			write_log(DEBUG, "Sent JSON response.");
 			break;
 		case DEV_HOME:
+		case AUTH_HOME:
 		case PUMP_HOME:
 			write_log(INFO, "Sent HTML page.");
 			break;
@@ -72,45 +84,73 @@ void handle_request(const char *request_buffer, char *response_buffer, time_t st
 
 request_t get_request_type(const char *request_buffer)
 {
-	if (strstr(request_buffer, "GET /dev/status"))
+	if (strstr(request_buffer, "POST /auth"))
+		return AUTH_POST;
+	else if (strstr(request_buffer, "GET /dev/status"))
 		return DEV_STATUS;
+	else if (strstr(request_buffer, "GET /pump/status"))
+		return PUMP_STATUS;
+	else if (!strstr(request_buffer, AUTH_SUCCESS_COOKIE))
+		return AUTH_HOME; 
 	else if (strstr(request_buffer, "GET /dev"))
 		return DEV_HOME;
-	else if (strstr(request_buffer, "GET /status"))
-		return PUMP_STATUS;
 	else if (strstr(request_buffer, "GET /"))
 		return PUMP_HOME;
-	else if (strstr(request_buffer, "POST /") && strstr(request_buffer, "ON"))
+	else if (strstr(request_buffer, "POST /pump") && strstr(request_buffer, "ON"))
 		return PUMP_ON;
-	else if (strstr(request_buffer, "POST /") && strstr(request_buffer, "OFF"))
+	else if (strstr(request_buffer, "POST /pump") && strstr(request_buffer, "OFF"))
 		return PUMP_OFF;
 	return NONE;
 }
 
 void set_header(char *response_buffer, request_t request_type)
 {
-	strcat(response_buffer, "HTTP/1.1 200 OK\r\n");
 	switch (request_type) {
 		case DEV_STATUS:
+			strcat(response_buffer, "HTTP/1.1 200 OK\r\n");
 			strcat(response_buffer, "Content-type: application/json\r\n\r\n");
 			break;
 		case PUMP_STATUS:
+			strcat(response_buffer, "HTTP/1.1 200 OK\r\n");
 			strcat(response_buffer, "Content-type: application/json\r\n\r\n");
 			break;
 		case DEV_HOME:
 		case PUMP_HOME:
+			strcat(response_buffer, "HTTP/1.1 200 OK\r\n");
+			strcat(response_buffer, "Content-type: text/html\r\n\r\n");
+			break;
+		case AUTH_HOME:
+			strcat(response_buffer, "HTTP/1.1 203 Non-Authoritative Information\r\n");
 			strcat(response_buffer, "Content-type: text/html\r\n\r\n");
 			break;
 		case PUMP_ON:
 			set_sensor_value(RELAY, 1);
+			strcat(response_buffer, "HTTP/1.1 200 OK\r\n");
 			strcat(response_buffer, "Content-type: text/plain\r\n\r\nON\r\n");
 			break;
 		case PUMP_OFF:
 			set_sensor_value(RELAY, 0);
+			strcat(response_buffer, "HTTP/1.1 200 OK\r\n");
 			strcat(response_buffer, "Content-type: text/plain\r\n\r\nOFF\r\n");
 			break;
 		default:
 			break;
+	}
+}
+
+void set_authorization(char *response_buffer, const char *request_buffer, request_t request_type)
+{
+	if (request_type != AUTH_POST) return;
+	if (strstr(request_buffer, PASSWORD)) {
+		strcat(response_buffer, "HTTP/1.1 200 OK\r\n");
+		strcat(response_buffer, "Content-type: text/plain\r\n");
+		strcat(response_buffer, "Set-cookie: " AUTH_SUCCESS_COOKIE "; Max-age=" COOKIE_MAX_AGE "; SameSite=None; Secure\r\n\r\n");
+		strcat(response_buffer, "SUCCESS\r\n");
+	} else {
+		strcat(response_buffer, "HTTP/1.1 203 Non-Authoritative Information\r\n");
+		strcat(response_buffer, "Content-type: text/plain\r\n");
+		strcat(response_buffer, "Set-cookie: " AUTH_FAILURE_COOKIE "; Max-age=" COOKIE_MAX_AGE "; SameSite=None; Secure\r\n\r\n");
+		strcat(response_buffer, "FAILURE\r\n");
 	}
 }
 
@@ -147,6 +187,7 @@ void set_precontent(char *response_buffer, request_t request_type)
 {
 	switch (request_type) {
 		case DEV_HOME:
+		case AUTH_HOME:
 		case PUMP_HOME:
 			strcat(response_buffer, "<!DOCTYPE html>\r\n");
 			strcat(response_buffer, "<html lang='en' data-bs-theme='dark'>\r\n");
@@ -156,16 +197,20 @@ void set_precontent(char *response_buffer, request_t request_type)
 			strcat(response_buffer, "    <title>Smart pump</title>\r\n");
 			strcat(response_buffer, "    <link rel='icon' type='image/x-icon' href='https://avatars.githubusercontent.com/t/6664638'>\r\n");
 			strcat(response_buffer, "    <link rel='preconnect' href='https://fonts.googleapis.com'>\r\n");
-			strcat(response_buffer, "    <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin=''>\r\n");
-			strcat(response_buffer, "    <link href='https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&amp;display=swap' rel='stylesheet'>\r\n");
+			strcat(response_buffer, "    <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>\r\n");
+			strcat(response_buffer, "    <link href='https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap' rel='stylesheet'>\r\n");
 			strcat(response_buffer, "    <link href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css' rel='stylesheet' integrity='sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH' crossorigin='anonymous'>\r\n");
 			strcat(response_buffer, "    <style>\r\n");
 			strcat(response_buffer, "        * { font-family: 'Open Sans' 'Helvetica Neue' Helvetica sans-serif; }\r\n");
 			strcat(response_buffer, "        nav.navbar { color: white; }\r\n");
 			strcat(response_buffer, "        div#main-body { width: 100%; }\r\n");
 			strcat(response_buffer, "    </style>\r\n");
+			strcat(response_buffer, "    <script>\r\n");
+			strcat(response_buffer, "      theme = localStorage.getItem('theme')\r\n");
+			strcat(response_buffer, "      if (theme) document.documentElement.dataset.bsTheme = theme\r\n");
+			strcat(response_buffer, "    </script>\r\n");
 			strcat(response_buffer, "  </head>\r\n");
-			strcat(response_buffer, "  <body class='d-flex flex-column min-vh-100' onload='init_theme()'>\r\n");
+			strcat(response_buffer, "  <body class='d-flex flex-column min-vh-100'>\r\n");
 			strcat(response_buffer, "    <nav class='navbar shadow bg-primary py-2 text-center'>\r\n");
 			strcat(response_buffer, "      <div class='container-md'>\r\n");
 			strcat(response_buffer, "        <div>\r\n");
@@ -242,6 +287,25 @@ void set_content(char *response_buffer, request_t request_type, time_t start)
             strcat(response_buffer, "      </div>\r\n");
             strcat(response_buffer, "    </div>\r\n");
 			break;
+		case AUTH_HOME:
+			strcat(response_buffer, "    <div id='main-body' class='container-md text-center'>\r\n");
+			strcat(response_buffer, "      <div class='card m-4 p-4'>\r\n");
+			strcat(response_buffer, "        <div class='m-4'>\r\n");
+			strcat(response_buffer, "          <b class='card-title'>ESP-WROOM-32</b>\r\n");
+			strcat(response_buffer, "        </div>\r\n");
+			strcat(response_buffer, "        <div class='m-4'>\r\n");
+			strcat(response_buffer, "          <div class='row'>\r\n");
+			strcat(response_buffer, "            <div class='col'>\r\n");
+			strcat(response_buffer, "              <label for='password_input'><b>Password</b></label>\r\n");
+			strcat(response_buffer, "            </div>\r\n");
+			strcat(response_buffer, "            <div class='col'>\r\n");
+			strcat(response_buffer, "              <input type='password' class='px-1 container-md' id='password_input' required autofocus>\r\n");
+			strcat(response_buffer, "            </div>\r\n");
+			strcat(response_buffer, "          </div>\r\n");
+			strcat(response_buffer, "        </div>\r\n");
+			strcat(response_buffer, "      </div>\r\n");
+			strcat(response_buffer, "    </div>\r\n");
+			break;
 		case DEV_HOME:
 			strcat(response_buffer, "    <div id='main-body' class='container-md text-center'>\r\n");
 			strcat(response_buffer, "      <div class='p-4 mt-4'>\r\n");
@@ -302,6 +366,7 @@ void set_footer(char *response_buffer, request_t request_type)
 {
 	switch (request_type) {
 		case DEV_HOME:
+		case AUTH_HOME:
 		case PUMP_HOME:
 			strcat(response_buffer, "    <footer class='text-center pb-2 mt-auto'>\r\n");
 			strcat(response_buffer, "      VBDCSS IoT Club @ 2024\r\n");
@@ -316,59 +381,74 @@ void set_scripts(char *response_buffer, request_t request_type)
 {
 	switch (request_type) {
 		case PUMP_HOME:
-            strcat(response_buffer, "    <script>\r\n");
-            strcat(response_buffer, "      async function send_pump_control() {\r\n");
-            strcat(response_buffer, "        await fetch('/', {\r\n");
-            strcat(response_buffer, "          method: 'POST',\r\n");
-            strcat(response_buffer, "          headers: { 'Content-type': 'text/plain' },\r\n");
-            strcat(response_buffer, "          body: document.getElementById('relay_control').innerHTML\r\n");
-            strcat(response_buffer, "        })\r\n");
-            strcat(response_buffer, "      }\r\n");
-            strcat(response_buffer, "    </script>\r\n");
-            strcat(response_buffer, "    <script>\r\n");
-            strcat(response_buffer, "      function refresh_data() {\r\n");
-            strcat(response_buffer, "        fetch('/status')\r\n");
-            strcat(response_buffer, "        .then(response => response.json())\r\n");
-            strcat(response_buffer, "        .then(data => {\r\n");
-            strcat(response_buffer, "          for (const key in data) {\r\n");
-            strcat(response_buffer, "            element = document.getElementById(key)\r\n");
-            strcat(response_buffer, "            element.innerHTML = data[key] == 0 ? 'OFF' : 'ON';\r\n");
-            strcat(response_buffer, "            if (key == 'relay')\r\n");
-            strcat(response_buffer, "              document.getElementById('relay_control').innerHTML = data[key] == 1 ? 'OFF' : 'ON'\r\n");
-            strcat(response_buffer, "          }\r\n");
-            strcat(response_buffer, "          if ((data['t_bottom'] == 0 && data['t_top'] == 0) || (data['t_bottom'] == 1 && data['t_top'] == 1) || data['r_bottom'] == 0)\r\n");
-            strcat(response_buffer, "            document.getElementById('relay_control').setAttribute('class', 'btn shadow-sm btn-primary disabled')\r\n");
-            strcat(response_buffer, "          else\r\n");
-            strcat(response_buffer, "            document.getElementById('relay_control').setAttribute('class', 'btn shadow-sm btn-primary')\r\n");
-            strcat(response_buffer, "        })\r\n");
-            strcat(response_buffer, "      }\r\n");
-            strcat(response_buffer, "      setInterval(refresh_data, 1000)\r\n");
-            strcat(response_buffer, "    </script>\r\n");
+			strcat(response_buffer, "    <script>\r\n");
+			strcat(response_buffer, "      function send_pump_control() {\r\n");
+			strcat(response_buffer, "        fetch('/pump', {\r\n");
+			strcat(response_buffer, "          method: 'POST',\r\n");
+			strcat(response_buffer, "          headers: { 'Content-type': 'text/plain' },\r\n");
+			strcat(response_buffer, "          body: document.getElementById('relay_control').innerHTML\r\n");
+			strcat(response_buffer, "        }).then(response => {\r\n");
+			strcat(response_buffer, "          if (response.status != 200) window.location.reload()\r\n");
+			strcat(response_buffer, "        })\r\n");
+			strcat(response_buffer, "      }\r\n");
+			strcat(response_buffer, "    </script>\r\n");
+			strcat(response_buffer, "    <script>\r\n");
+			strcat(response_buffer, "      function refresh_data() {\r\n");
+			strcat(response_buffer, "        fetch('/pump/status')\r\n");
+			strcat(response_buffer, "        .then(response => response.json())\r\n");
+			strcat(response_buffer, "        .then(data => {\r\n");
+			strcat(response_buffer, "          for (const key in data) {\r\n");
+			strcat(response_buffer, "            element = document.getElementById(key)\r\n");
+			strcat(response_buffer, "            element.innerHTML = data[key] == 0 ? 'OFF' : 'ON';\r\n");
+			strcat(response_buffer, "            if (key == 'relay')\r\n");
+			strcat(response_buffer, "              document.getElementById('relay_control').innerHTML = data[key] == 1 ? 'OFF' : 'ON'\r\n");
+			strcat(response_buffer, "          }\r\n");
+			strcat(response_buffer, "          if ((data['t_bottom'] == 0 && data['t_top'] == 0) || (data['t_bottom'] == 1 && data['t_top'] == 1) || data['r_bottom'] == 0)\r\n");
+			strcat(response_buffer, "            document.getElementById('relay_control').setAttribute('class', 'btn shadow-sm btn-primary disabled')\r\n");
+			strcat(response_buffer, "          else\r\n");
+			strcat(response_buffer, "            document.getElementById('relay_control').setAttribute('class', 'btn shadow-sm btn-primary')\r\n");
+			strcat(response_buffer, "        })\r\n");
+			strcat(response_buffer, "      }\r\n");
+			strcat(response_buffer, "      setInterval(refresh_data, 1000)\r\n");
+			strcat(response_buffer, "    </script>\r\n");
+			break;
+		case AUTH_HOME:
+			strcat(response_buffer, "    <script>\r\n");
+			strcat(response_buffer, "      document.getElementById('password_input')\r\n");
+			strcat(response_buffer, "      .addEventListener('keydown', async function send_password(event) {\r\n");
+			strcat(response_buffer, "        if (event.keyCode == 13) {\r\n");
+			strcat(response_buffer, "          fetch('/auth', {\r\n");
+			strcat(response_buffer, "            method: 'POST',\r\n");
+			strcat(response_buffer, "            headers: { 'Content-type': 'text/plain' },\r\n");
+			strcat(response_buffer, "            body: document.getElementById('password_input').value\r\n");
+			strcat(response_buffer, "          }).then(response => {\r\n");
+			strcat(response_buffer, "            if (response.status == 200) window.location.reload()\r\n");
+			strcat(response_buffer, "          })\r\n");
+			strcat(response_buffer, "        }\r\n");
+			strcat(response_buffer, "      })\r\n");
+			strcat(response_buffer, "    </script>\r\n");
 			break;
 		case DEV_HOME:
 			strcat(response_buffer, "    <script>\r\n");
-            strcat(response_buffer, "      function refresh_data() {\r\n");
-            strcat(response_buffer, "        fetch('/dev/status')\r\n");
-            strcat(response_buffer, "        .then(response => response.json())\r\n");
-            strcat(response_buffer, "        .then(data => {\r\n");
-            strcat(response_buffer, "          for (const key in data)\r\n");
-            strcat(response_buffer, "            document.getElementById(key).innerHTML = data[key];\r\n");
-            strcat(response_buffer, "        })\r\n");
-            strcat(response_buffer, "      }\r\n");
-            strcat(response_buffer, "      setInterval(refresh_data, 1000)\r\n");
-            strcat(response_buffer, "    </script>\r\n");
+			strcat(response_buffer, "      function refresh_data() {\r\n");
+			strcat(response_buffer, "        fetch('/pump/dev/status')\r\n");
+			strcat(response_buffer, "        .then(response => response.json())\r\n");
+			strcat(response_buffer, "        .then(data => {\r\n");
+			strcat(response_buffer, "          for (const key in data)\r\n");
+			strcat(response_buffer, "            document.getElementById(key).innerHTML = data[key];\r\n");
+			strcat(response_buffer, "        })\r\n");
+			strcat(response_buffer, "      }\r\n");
+			strcat(response_buffer, "      setInterval(refresh_data, 1000)\r\n");
+			strcat(response_buffer, "    </script>\r\n");
 			break;
 		default:
 			break;
 	}
 	switch (request_type) {
 		case DEV_HOME:
+		case AUTH_HOME:
 		case PUMP_HOME:
 			strcat(response_buffer, "    <script>\r\n");
-			strcat(response_buffer, "      function init_theme() {\r\n");
-			strcat(response_buffer, "        theme = localStorage.getItem('theme')\r\n");
-			strcat(response_buffer, "        if (theme) document.documentElement.dataset.bsTheme = theme\r\n");
-			strcat(response_buffer, "      }\r\n");
 			strcat(response_buffer, "      function toggle_theme() {\r\n");
 			strcat(response_buffer, "        dataset = document.documentElement.dataset\r\n");
 			strcat(response_buffer, "        dataset.bsTheme = dataset.bsTheme == 'dark' ? 'light' : 'dark'\r\n");
