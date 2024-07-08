@@ -4,8 +4,7 @@ BUILD	= build
 BINARY	= automatic_pump
 OBJECTS = $(BUILD)/request_handler.o $(BUILD)/fake_sensors.o $(BUILD)/server.o $(BUILD)/logger.o $(BUILD)/main.o
 
-
-all: $(BINARY)
+all: init $(BINARY)
 
 $(BINARY): $(OBJECTS)
 	$(CC) $^ -o $@ $(ARGS)
@@ -21,3 +20,4 @@ run: $(BINARY)
 
 clean:
 	rm -f $(BUILD)/*.o
+	rm -f $(BINARY)
